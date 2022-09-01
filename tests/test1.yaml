@@ -121,6 +121,7 @@ mqtt:
     - topic: livingroom/ota_mode
       then:
         - deep_sleep.prevent
+        - deep_sleep.allow
     - topic: livingroom/ota_mode
       then:
         - deep_sleep.enter:
@@ -167,6 +168,13 @@ mqtt:
                 id: uart0
                 data: !lambda |-
                   return {};
+  on_connect:
+    - light.turn_on: ${roomname}_lights
+    - mqtt.publish:
+        topic: some/topic
+        payload: Hello
+  on_disconnect:
+    - light.turn_off: ${roomname}_lights
 
 i2c:
   sda: 21
@@ -247,9 +255,7 @@ logger:
 
 web_server:
   port: 8080
-  ota: true
-  css_url: https://esphome.io/_static/webserver-v1.min.css
-  js_url: https://esphome.io/_static/webserver-v1.min.js
+  version: 2
 
 power_supply:
   id: "atx_power_supply"
@@ -262,7 +268,7 @@ power_supply:
 deep_sleep:
   run_duration: 20s
   sleep_duration: 50s
-  wakeup_pin: GPIO39
+  wakeup_pin: GPIO2
   wakeup_pin_mode: INVERT_WAKEUP
 
 ads1115:
@@ -282,6 +288,8 @@ adalight:
 
 esp32_ble_tracker:
 
+bluetooth_proxy:
+
 ble_client:
   - mac_address: AA:BB:CC:DD:EE:FF
     id: ble_foo
@@ -293,6 +301,12 @@ ble_client:
     on_disconnect:
       then:
         - switch.turn_on: ble1_status
+  - mac_address: C4:4F:33:11:22:33
+    id: my_bedjet_ble_client
+bedjet:
+  - ble_client_id: my_bedjet_ble_client
+    id: my_bedjet_client
+    time_id: sntp_time
 mcp23s08:
   - id: "mcp23s08_hub"
     cs_pin: GPIO12
@@ -358,6 +372,7 @@ sensor:
       - exponential_moving_average:
           alpha: 0.1
           send_every: 15
+          send_first_at: 15
       - throttle_average: 60s
       - throttle: 1s
       - heartbeat: 5s
@@ -456,12 +471,17 @@ sensor:
     name: "Living Room Brightness 3"
     internal: true
     address: 0x23
-    resolution: 1.0
     update_interval: 30s
     retain: False
     availability:
     state_topic: livingroom/custom_state_topic
-    measurement_duration: 31
+    i2c_id: i2c_bus
+  - platform: max44009
+    name: "Outside Brightness 1"
+    internal: true
+    address: 0x4A
+    update_interval: 30s
+    mode: low_power
     i2c_id: i2c_bus
   - platform: bme280
     temperature:
@@ -541,11 +561,18 @@ sensor:
   - platform: esp32_hall
     name: "ESP32 Hall Sensor"
     update_interval: 15s
-  - platform: hdc1080
+  - platform: ens210
     temperature:
       name: "Living Room Temperature 5"
     humidity:
-      name: "Living Room Pressure 5"
+      name: 'Living Room Humidity 5'
+    update_interval: 15s
+    i2c_id: i2c_bus
+  - platform: hdc1080
+    temperature:
+      name: 'Living Room Temperature 6'
+    humidity:
+      name: 'Living Room Humidity 5'
     update_interval: 15s
     i2c_id: i2c_bus
   - platform: hlw8012
@@ -579,7 +606,6 @@ sensor:
     sensor: hlw8012_power
     name: "Integration Sensor lazy"
     time_unit: s
-    min_save_interval: 60s
   - platform: hmc5883l
     address: 0x68
     field_strength_x:
@@ -594,6 +620,14 @@ sensor:
     oversampling: 8x
     update_interval: 15s
     i2c_id: i2c_bus
+  - platform: honeywellabp
+    pressure:
+      name: "Honeywell pressure"
+      min_pressure: 0
+      max_pressure: 15
+    temperature:
+      name: "Honeywell temperature"
+    cs_pin: GPIO5
   - platform: qmc5883l
     address: 0x0D
     field_strength_x:
@@ -719,6 +753,31 @@ sensor:
     temperature:
       name: "MPU6050 Temperature"
     i2c_id: i2c_bus
+  - platform: mpu6886
+    address: 0x68
+    accel_x:
+      name: "MPU6886 Accel X"
+    accel_y:
+      name: "MPU6886 Accel Y"
+    accel_z:
+      name: "MPU6886 Accel z"
+    gyro_x:
+      name: "MPU6886 Gyro X"
+    gyro_y:
+      name: "MPU6886 Gyro Y"
+    gyro_z:
+      name: "MPU6886 Gyro z"
+    temperature:
+      name: "MPU6886 Temperature"
+    i2c_id: i2c_bus
+  - platform: dps310
+    temperature:
+      name: "DPS310 Temperature"
+    pressure:
+      name: "DPS310 Pressure"
+    address: 0x77
+    update_interval: 15s
+    i2c_id: i2c_bus
   - platform: ms5611
     temperature:
       name: "Outside Temperature"
@@ -769,6 +828,17 @@ sensor:
           value: 12345
     total:
       name: "Pulse Meter Total"
+  - platform: qmp6988
+    temperature:
+      name: "Living Temperature QMP"
+      oversampling: 32x
+    pressure:
+      name: "Living Pressure QMP"
+      oversampling: 2x
+    address: 0x70
+    update_interval: 30s
+    iir_filter: 16x
+    i2c_id: i2c_bus
   - platform: rotary_encoder
     name: "Rotary Encoder"
     id: rotary_encoder1
@@ -841,6 +911,7 @@ sensor:
     temperature_offset: 4.2C
     i2c_id: i2c_bus
   - platform: scd4x
+    id: scd40
     co2:
       name: "SCD4X CO2"
     temperature:
@@ -1080,7 +1151,7 @@ sensor:
   - platform: max9611
     i2c_id: i2c_bus
     shunt_resistance: 0.2 ohm
-    gain: '1X'
+    gain: "1X"
     voltage:
       name: Max9611 Voltage
     current:
@@ -1090,8 +1161,7 @@ sensor:
     temperature:
       name: Max9611 Temp
     update_interval: 1s
-  
-  
+
 esp32_touch:
   setup_mode: False
   iir_filter: 10ms
@@ -1307,6 +1377,34 @@ binary_sensor:
         ]
   - platform: as3935
     name: "Storm Alert"
+  - platform: analog_threshold
+    name: Analog Trheshold 1
+    sensor_id: template_sensor
+    threshold:
+      upper: 110
+      lower: 90
+    filters:
+      - delayed_on: 0s
+      - delayed_off: 10s
+  - platform: analog_threshold
+    name: Analog Trheshold 2
+    sensor_id: template_sensor
+    threshold: 100
+    filters:
+      - invert:
+  - platform: template
+    id: open_endstop_sensor
+  - platform: template
+    id: open_sensor
+  - platform: template
+    id: open_obstacle_sensor
+
+  - platform: template
+    id: close_endstop_sensor
+  - platform: template
+    id: close_sensor
+  - platform: template
+    id: close_obstacle_sensor
 
 pca9685:
   frequency: 500
@@ -1463,6 +1561,28 @@ output:
   - platform: mcp4725
     id: mcp4725_dac_output
     i2c_id: i2c_bus
+  - platform: mcp4728
+    id: mcp4728_dac_output_a
+    channel: A
+    vref: vdd
+    power_down: normal
+  - platform: mcp4728
+    id: mcp4728_dac_output_b
+    channel: B
+    vref: internal
+    gain: X1
+    power_down: gnd_1k
+  - platform: mcp4728
+    id: mcp4728_dac_output_c
+    channel: C
+    vref: vdd
+    power_down: gnd_100k
+  - platform: mcp4728
+    id: mcp4728_dac_output_d
+    channel: D
+    vref: internal
+    gain: X2
+    power_down: gnd_500k
 
 e131:
 
@@ -1674,6 +1794,18 @@ light:
         to: 25
       - single_light_id: ${roomname}_lights
 
+  - platform: shelly_dimmer
+    name: "Shelly Dimmer Light"
+    power:
+      name: "Shelly Dimmer Power"
+    voltage:
+      name: "Shelly Dimmer Voltage"
+    current:
+      name: "Shelly Dimmer Current"
+    max_brightness: 500
+    firmware: "51.6"
+    uart_id: uart0
+
 remote_transmitter:
   - pin: 32
     carrier_duty_percent: 100%
@@ -1713,6 +1845,8 @@ climate:
     name: Fujitsu General Climate
   - platform: daikin
     name: Daikin Climate
+  - platform: delonghi
+    name: Delonghi Climate
   - platform: yashima
     name: Yashima Climate
   - platform: mitsubishi
@@ -1781,6 +1915,12 @@ climate:
     ble_client_id: ble_blah
     unit_of_measurement: c
     icon: mdi:stove
+  - platform: bedjet
+    name: My Bedjet
+    bedjet_id: my_bedjet_client
+    heat_mode: extended
+  - platform: whynter
+    name: Whynter
 
 script:
   - id: climate_custom
@@ -1796,14 +1936,6 @@ script:
           preset: SLEEP
 
 switch:
-  - platform: template
-    name: MIDEA_AC_TOGGLE_LIGHT
-    turn_on_action:
-      midea_ac.display_toggle:
-  - platform: template
-    name: MIDEA_AC_SWING_STEP
-    turn_on_action:
-      midea_ac.swing_step:
   - platform: template
     name: MIDEA_AC_BEEPER_CONTROL
     optimistic: true
@@ -1846,6 +1978,11 @@ switch:
     turn_on_action:
       remote_transmitter.transmit_jvc:
         data: 0x10EF
+  - platform: template
+    name: MagiQuest
+    turn_on_action:
+      remote_transmitter.transmit_magiquest:
+        wand_id: 0x01234567
   - platform: template
     name: NEC
     id: living_room_lights_off
@@ -1949,6 +2086,13 @@ switch:
       remote_transmitter.transmit_raw:
         code: [1000, -1000]
   - platform: template
+    name: AEHA
+    id: eaha_hitachi_climate_power_on
+    turn_on_action:
+      remote_transmitter.transmit_aeha:
+        address: 0x8008
+        data: [0x00, 0x02, 0xFD, 0xFF, 0x00, 0x33, 0xCC, 0x49, 0xB6, 0xC8, 0x37, 0x16, 0xE9, 0x00, 0xFF, 0x00, 0xFF, 0x00, 0xFF, 0x00, 0xFF, 0x00, 0xFF, 0xCA, 0x35, 0x8F, 0x70, 0x00, 0xFF, 0x00, 0xFF, 0x00, 0xFF, 0x00, 0xFF]
+  - platform: template
     name: Living Room Lights
     id: livingroom_lights
     optimistic: True
@@ -1969,6 +2113,9 @@ switch:
           level: !lambda "return 0.5;"
       - output.set_level:
           id: mcp4725_dac_output
+          level: !lambda "return 0.5;"
+      - output.set_level:
+          id: mcp4728_dac_output_a
           level: !lambda "return 0.5;"
     turn_off_action:
       - switch.turn_on: living_room_lights_off
@@ -2079,6 +2226,12 @@ fan:
     on_speed_set:
       then:
         - logger.log: "Fan speed was changed!"
+  - platform: bedjet
+    name: My Bedjet fan
+    bedjet_id: my_bedjet_client
+  - platform: copy
+    source_id: fan_speed
+    name: "Fan Speed Copy"
 
 interval:
   - interval: 10s
@@ -2130,6 +2283,17 @@ display:
   - platform: lcd_pcf8574
     dimensions: 18x4
     address: 0x3F
+    user_characters:
+      - position: 0
+        data:
+          - 0b00000
+          - 0b01010
+          - 0b00000
+          - 0b00100
+          - 0b00100
+          - 0b10001
+          - 0b01110
+          - 0b00000
     lambda: |-
       it.print("Hello World!");
     i2c_id: i2c_bus
@@ -2240,6 +2404,7 @@ display:
     lambda: |-
       it.rectangle(0, 0, it.get_width(), it.get_height());
   - platform: st7789v
+    model: TTGO TDisplay 135x240
     cs_pin: GPIO5
     dc_pin: GPIO16
     reset_pin: GPIO23
@@ -2291,6 +2456,21 @@ display:
         it.fill(Color::WHITE);
         id(glob_bool_processed) = true;
       }
+  - platform: pvvx_mithermometer
+    ble_client_id: ble_foo
+    time_id: sntp_time
+    disconnect_delay: 3s
+    update_interval: 10min
+    validity_period: 20min
+    lambda: |-
+      it.print_bignum(188.8);
+      it.print_unit(pvvx_mithermometer::UNIT_DEG_E);
+      it.print_smallnum(88);
+      it.print_percent(true);
+      it.print_happy(true);
+      it.print_sad(true);
+      it.print_bracket(true);
+      it.print_battery(true);
 
 tm1651:
   id: tm1651_battery
@@ -2345,6 +2525,12 @@ rc522_i2c:
     on_tag:
       - lambda: |-
           ESP_LOGD("main", "Found tag %s", x.c_str());
+    i2c_id: i2c_bus
+
+mcp4728:
+  - id: mcp4728_dac
+    store_in_eeprom: False
+    address: 0x60
     i2c_id: i2c_bus
 
 gps:
@@ -2407,6 +2593,36 @@ cover:
     id: am43_test
     ble_client_id: ble_foo
     icon: mdi:blinds
+  - platform: feedback
+    name: "Feedback Cover"
+    id: gate
+    device_class: gate
+
+    infer_endstop_from_movement: false
+    has_built_in_endstop: false
+    max_duration: 30s
+    direction_change_wait_time: 300ms
+    acceleration_wait_time: 150ms
+    obstacle_rollback: 10%
+
+    open_duration: 22.1s
+    open_endstop: open_endstop_sensor
+    open_sensor: open_sensor
+    open_obstacle_sensor: open_obstacle_sensor
+
+    close_duration: 22.4s
+    close_endstop: close_endstop_sensor
+    close_sensor: close_sensor
+    close_obstacle_sensor: close_obstacle_sensor
+
+    open_action:
+      - logger.log: Open Action
+
+    close_action:
+      - logger.log: Close Action
+
+    stop_action:
+      - logger.log: Stop Action
 
 debug:
 
@@ -2476,6 +2692,18 @@ globals:
     initial_value: "false"
 
 text_sensor:
+  - platform: ble_client
+    ble_client_id: ble_foo
+    name: "Sensor Location"
+    service_uuid: "180d"
+    characteristic_uuid: "2a38"
+    descriptor_uuid: "2902"
+    notify: true
+    update_interval: never
+    on_notify:
+      then:
+        - lambda: |-
+            ESP_LOGD("green_btn", "Location changed: %s", x.c_str());
   - platform: mqtt_subscribe
     name: "MQTT Subscribe Text"
     topic: "the/topic"
@@ -2499,6 +2727,16 @@ text_sensor:
           canbus_id: esp32_internal_can
           can_id: 23
           data: [0x10, 0x20, 0x30]
+      - canbus.send:
+          canbus_id: mcp2515_can
+          can_id: 24
+          remote_transmission_request: true
+          data: []
+      - canbus.send:
+          canbus_id: esp32_internal_can
+          can_id: 24
+          remote_transmission_request: true
+          data: []
   - platform: template
     name: Template Text Sensor
     id: ${textname}_text
@@ -2543,7 +2781,7 @@ canbus:
         then:
           - lambda: |-
               std::string b(x.begin(), x.end());
-              ESP_LOGD("canid 500", "%s", &b[0] );
+              ESP_LOGD("canid 500", "%s", b.c_str());
       - can_id: 23
         then:
           - if:
@@ -2551,6 +2789,25 @@ canbus:
                 lambda: "return x[0] == 0x11;"
               then:
                 light.toggle: ${roomname}_lights
+      - can_id: 0b00000000000000000000001000000
+        can_id_mask: 0b11111000000000011111111000000
+        use_extended_id: true
+        then:
+          - lambda: |-
+              auto pdo_id = can_id >> 14;
+              switch (pdo_id)
+              {
+                case 117:
+                  ESP_LOGD("canbus", "exhaust_fan_duty");
+                  break;
+                case 118:
+                  ESP_LOGD("canbus", "supply_fan_duty");
+                  break;
+                case 119:
+                  ESP_LOGD("canbus", "supply_fan_flow");
+                  break;
+                // to be continued...
+              }
   - platform: esp32_can
     id: esp32_internal_can
     rx_pin: GPIO04
@@ -2562,7 +2819,7 @@ canbus:
         then:
           - lambda: |-
               std::string b(x.begin(), x.end());
-              ESP_LOGD("canid 500", "%s", &b[0] );
+              ESP_LOGD("canid 500", "%s", b.c_str() );
       - can_id: 23
         then:
           - if:
@@ -2570,6 +2827,25 @@ canbus:
                 lambda: "return x[0] == 0x11;"
               then:
                 light.toggle: ${roomname}_lights
+      - can_id: 0b00000000000000000000001000000
+        can_id_mask: 0b11111000000000011111111000000
+        use_extended_id: true
+        then:
+          - lambda: |-
+              auto pdo_id = can_id >> 14;
+              switch (pdo_id)
+              {
+                case 117:
+                  ESP_LOGD("canbus", "exhaust_fan_duty");
+                  break;
+                case 118:
+                  ESP_LOGD("canbus", "supply_fan_duty");
+                  break;
+                case 119:
+                  ESP_LOGD("canbus", "supply_fan_flow");
+                  break;
+                // to be continued...
+              }
 
 teleinfo:
   id: myteleinfo
@@ -2596,6 +2872,9 @@ select:
       - one
       - two
     optimistic: true
+  - platform: copy
+    source_id: test_select
+    name: Test Select Copy
 
 qr_code:
   - id: homepage_qr
@@ -2625,3 +2904,36 @@ lock:
     name: "Generic Output Lock"
     id: test_lock2
     output: pca_6
+  - platform: copy
+    source_id: test_lock2
+    name: Generic Output Lock Copy
+
+button:
+  - platform: template
+    name: "Start calibration"
+    on_press:
+      - scd4x.perform_forced_calibration:
+          value: 419
+          id: scd40
+      - scd4x.factory_reset:
+          id: scd40
+  - platform: template
+    name: Midea Display Toggle
+    on_press:
+      midea_ac.display_toggle:
+  - platform: template
+    name: Midea Swing Step
+    on_press:
+      midea_ac.swing_step:
+  - platform: template
+    name: Midea Power On
+    on_press:
+      midea_ac.power_on:
+  - platform: template
+    name: Midea Power Off
+    on_press:
+      midea_ac.power_off:
+  - platform: template
+    name: Midea Power Inverse
+    on_press:
+      midea_ac.power_toggle:
